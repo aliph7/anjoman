@@ -8,7 +8,8 @@ from aiogram.filters import Command
 from database.db import setup_database
 from handlers.admin import register_handlers as register_admin_handlers
 from handlers.register import register_handlers as register_register_handlers
-from keyboards import main_menu  # ایمپورت از keyboards.py
+from handlers.contact import register_handlers as register_contact_handlers
+from keyboards import main_menu
 
 load_dotenv()
 
@@ -17,6 +18,14 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
+
+CONTACT_INFO = """
+📞 *راه‌های ارتباطی با ما:*
+📌 ایمیل: `support@example.com`
+📌 تلگرام: [ارتباط با ادمین](https://t.me/admin_username)
+📌 گروه انجمن: [ورود به گروه](https://t.me/group_link)
+📩 _لطفاً پیام خود را ارسال کنید، تیم ما در اسرع وقت پاسخ خواهد داد._
+"""
 
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
@@ -50,7 +59,7 @@ async def show_events(message: types.Message):
         return
     response = "🎯 رویدادها:\n\n"
     for event in events:
-        response += f"عنوان: {event[0]}\nتاریخ: {event[1]}\nتوضیحات: {event[2]}\n\n"
+        response += f"عنوان: {event['title']}\nتاریخ: {event['date']}\nتوضیحات: {event['description']}\n\n"
     await message.reply(response, reply_markup=main_menu)
 
 async def show_visits(message: types.Message):
@@ -67,7 +76,7 @@ async def show_visits(message: types.Message):
 async def show_profile(message: types.Message):
     from database.db import get_user
     user = get_user(str(message.from_user.id))
-    if not user or not user[6]:  # registered = 0
+    if not user or not user['registered']:
         await message.reply("لطفاً اول ثبت‌نام کن! از '📝 ثبت‌نام دوره/بازدید' استفاده کن.")
         return
     response = (
@@ -80,14 +89,19 @@ async def show_profile(message: types.Message):
     )
     await message.reply(response, reply_markup=main_menu)
 
+async def show_contact(message: types.Message):
+    await message.reply(CONTACT_INFO, parse_mode="Markdown", disable_web_page_preview=True, reply_markup=main_menu)
+
 def register_handlers(dp: Dispatcher):
     dp.message.register(start_cmd, Command(commands=["start"]))
     dp.message.register(show_courses, lambda msg: msg.text == "📚 دوره‌های آموزشی")
     dp.message.register(show_events, lambda msg: msg.text == "🎯 رویدادها")
     dp.message.register(show_visits, lambda msg: msg.text == "🏛 بازدیدها")
     dp.message.register(show_profile, lambda msg: msg.text == "👤 پروفایل من")
+    dp.message.register(show_contact, lambda msg: msg.text == "📞 تماس با ما")
     register_admin_handlers(dp)
     register_register_handlers(dp)
+    register_contact_handlers(dp)
 
 async def main():
     try:
