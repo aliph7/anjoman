@@ -4,7 +4,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from database.db import (add_event, add_course, add_visit, get_registration, 
                         update_registration_status, get_user, get_all_registrations, 
-                        get_courses, get_visits, delete_course, delete_visit, get_all_registered_users)
+                        get_courses, get_visits, delete_course, delete_visit, 
+                        get_all_registered_users, get_all_contact_messages)  # اضافه کردن ایمپورت
 import logging
 import os
 from dotenv import load_dotenv
@@ -19,20 +20,21 @@ class AdminStates(StatesGroup):
     waiting_for_course_title = State()
     waiting_for_course_cost = State()
     waiting_for_course_desc = State()
-    waiting_for_course_photo = State()  # حالت جدید برای عکس دوره
+    waiting_for_course_photo = State()
     waiting_for_event_title = State()
     waiting_for_event_date = State()
     waiting_for_event_desc = State()
-    waiting_for_event_photo = State()  # حالت جدید برای عکس رویداد
+    waiting_for_event_photo = State()
     waiting_for_visit_title = State()
     waiting_for_visit_cost = State()
     waiting_for_visit_desc = State()
-    waiting_for_visit_photo = State()  # حالت جدید برای عکس بازدید
+    waiting_for_visit_photo = State()
     waiting_for_reg_id = State()
     waiting_for_confirmation = State()
     waiting_for_item_selection = State()
     waiting_for_registrant_selection = State()
     waiting_for_item_to_delete = State()
+    waiting_for_contact_selection = State()  # حالت جدید برای انتخاب پیام تماس
 
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
@@ -41,6 +43,7 @@ admin_menu = types.ReplyKeyboardMarkup(
         [types.KeyboardButton(text="➕ رویداد جدید"), types.KeyboardButton(text="➕ دوره جدید")],
         [types.KeyboardButton(text="➕ بازدید جدید"), types.KeyboardButton(text="✅ تأیید ثبت‌نام")],
         [types.KeyboardButton(text="📋 لیست ثبت‌نام‌ها"), types.KeyboardButton(text="🗑️ حذف دوره/بازدید")],
+        [types.KeyboardButton(text="📬 پیام‌های تماس")],  # گزینه جدید
         [types.KeyboardButton(text="لغو")]
     ],
     resize_keyboard=True
@@ -126,7 +129,6 @@ async def process_course_photo(message: types.Message, state: FSMContext):
     try:
         add_course(title=title, cost=cost, description=desc, photo=photo)
         await message.reply("✅ دوره با موفقیت اضافه شد!", reply_markup=admin_menu)
-        # ارسال پیام به همه کاربران
         users = get_all_registered_users()
         caption = f"📚 دوره جدید: {title}\nهزینه: {cost} تومان\nتوضیحات: {desc}"
         for user_id in users:
@@ -209,7 +211,6 @@ async def process_event_photo(message: types.Message, state: FSMContext):
     try:
         add_event(title, date, desc, photo)
         await message.reply("✅ رویداد با موفقیت اضافه شد!", reply_markup=admin_menu)
-        # ارسال پیام به همه کاربران
         users = get_all_registered_users()
         caption = f"🎉 رویداد جدید: {title}\nتاریخ: {date}\nتوضیحات: {desc}"
         for user_id in users:
@@ -298,7 +299,6 @@ async def process_visit_photo(message: types.Message, state: FSMContext):
     try:
         add_visit(title, cost, desc, photo)
         await message.reply("✅ بازدید با موفقیت اضافه شد!", reply_markup=admin_menu)
-        # ارسال پیام به همه کاربران
         users = get_all_registered_users()
         caption = f"🏛 بازدید جدید: {title}\nهزینه: {cost} تومان\nتوضیحات: {desc}"
         for user_id in users:
@@ -319,7 +319,6 @@ async def process_visit_photo(message: types.Message, state: FSMContext):
     finally:
         await state.clear()
 
-# بقیه توابع بدون تغییر
 async def start_confirm_registration(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         await message.reply("❌ دسترسی نداری!")
@@ -508,6 +507,46 @@ async def process_item_deletion(message: types.Message, state: FSMContext):
     finally:
         await state.clear()
 
+# توابع جدید برای نمایش پیام‌های تماس
+async def show_contact_messages(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.reply("❌ دسترسی نداری!")
+        return
+    contacts = get_all_contact_messages()
+    if not contacts:
+        await message.reply("هیچ پیامی از کاربران وجود نداره!", reply_markup=admin_menu)
+        await state.set_state(AdminStates.admin_panel)
+        return
+    kb = types.ReplyKeyboardMarkup(
+        keyboard=[[types.KeyboardButton(text=f"{c['name']} - {c['timestamp']}")] for c in contacts] +
+                 [[types.KeyboardButton(text="🔙 بازگشت")]],
+        resize_keyboard=True
+    )
+    await message.reply("پیام‌های تماس:\nانتخاب کن تا جزئیات رو ببینی:", reply_markup=kb)
+    await state.set_state(AdminStates.waiting_for_contact_selection)
+
+async def show_contact_details(message: types.Message, state: FSMContext):
+    if message.text == "🔙 بازگشت":
+        await message.reply("برگشتی به منوی ادمین!", reply_markup=admin_menu)
+        await state.set_state(AdminStates.admin_panel)
+        return
+    contacts = get_all_contact_messages()
+    selected = next((c for c in contacts if f"{c['name']} - {c['timestamp']}" == message.text), None)
+    if not selected:
+        await message.reply("این پیام پیدا نشد! دوباره انتخاب کن:")
+        return
+    user = get_user(selected["user_id"])
+    response = (
+        f"📬 جزئیات پیام:\n"
+        f"اسم: {selected['name']}\n"
+        f"آی‌دی کاربر: {selected['user_id']}\n"
+        f"پیام: {selected['message']}\n"
+        f"زمان: {selected['timestamp']}\n"
+        f"ایمیل: {user['email'] if user else 'نامشخص'}"
+    )
+    await message.reply(response, reply_markup=admin_menu)
+    await state.set_state(AdminStates.admin_panel)
+
 def register_handlers(dp: Dispatcher):
     dp.message.register(admin_cmd, Command(commands=["admin"]))
     dp.message.register(start_add_course, lambda message: message.text == "➕ دوره جدید", AdminStates.admin_panel)
@@ -533,3 +572,5 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(show_registrant_details, AdminStates.waiting_for_registrant_selection)
     dp.message.register(start_delete_item, lambda message: message.text == "🗑️ حذف دوره/بازدید", AdminStates.admin_panel)
     dp.message.register(process_item_deletion, AdminStates.waiting_for_item_to_delete)
+    dp.message.register(show_contact_messages, lambda message: message.text == "📬 پیام‌های تماس", AdminStates.admin_panel)
+    dp.message.register(show_contact_details, AdminStates.waiting_for_contact_selection)
