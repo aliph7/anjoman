@@ -34,7 +34,6 @@ def setup_database():
     with transaction() as conn:
         c = conn.cursor()
         
-        # ایجاد جداول اگه وجود نداشته باشن
         c.execute('''CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             name TEXT,
@@ -79,7 +78,15 @@ def setup_database():
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         )''')
         
-        # اضافه کردن ستون photo به جدول‌های موجود اگه وجود نداشته باشه
+        # جدول جدید برای پیام‌های تماس
+        c.execute('''CREATE TABLE IF NOT EXISTS contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            message TEXT NOT NULL,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )''')
+        
         c.execute('''ALTER TABLE events ADD COLUMN photo TEXT''') if not any(col[1] == "photo" for col in c.execute("PRAGMA table_info(events)")) else None
         c.execute('''ALTER TABLE courses ADD COLUMN photo TEXT''') if not any(col[1] == "photo" for col in c.execute("PRAGMA table_info(courses)")) else None
         c.execute('''ALTER TABLE visits ADD COLUMN photo TEXT''') if not any(col[1] == "photo" for col in c.execute("PRAGMA table_info(visits)")) else None
@@ -205,3 +212,19 @@ def get_all_registered_users():
         c.execute("SELECT user_id FROM users WHERE registered = 1")
         users = c.fetchall()
         return [user["user_id"] for user in users]
+
+# توابع جدید برای پیام‌های تماس
+def add_contact_message(user_id: str, message: str):
+    with transaction() as conn:
+        c = conn.cursor()
+        c.execute("INSERT INTO contacts (user_id, message) VALUES (?, ?)", (user_id, message))
+        logger.info(f"Contact message added for user {user_id}")
+
+def get_all_contact_messages():
+    with transaction() as conn:
+        c = conn.cursor()
+        c.execute('''SELECT c.id, c.user_id, c.message, c.timestamp, u.name 
+                     FROM contacts c 
+                     JOIN users u ON c.user_id = u.user_id''')
+        messages = c.fetchall()
+        return [{"id": m["id"], "user_id": m["user_id"], "message": m["message"], "timestamp": m["timestamp"], "name": m["name"]} for m in messages]
