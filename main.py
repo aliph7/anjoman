@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
+from aiohttp import web
 from database.db import setup_database
 from handlers.admin import register_handlers as register_admin_handlers
 from handlers.register import register_handlers as register_register_handlers
@@ -16,8 +17,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# متغیرهای محیطی
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://your-app-name.onrender.com")
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+PORT = int(os.getenv("PORT", 8000))
 
 CONTACT_INFO = """
 📞 *راه‌های ارتباطی با ما:*
@@ -42,7 +48,7 @@ async def start_cmd(message: types.Message):
 
 async def show_courses(message: types.Message):
     from database.db import get_courses
-    courses = get_courses()
+    courses = await get_courses()
     if not courses:
         await message.reply("هیچ دوره‌ای موجود نیست!")
         return
@@ -53,7 +59,7 @@ async def show_courses(message: types.Message):
 
 async def show_events(message: types.Message):
     from database.db import get_events
-    events = get_events()
+    events = await get_events()
     if not events:
         await message.reply("هیچ رویدادی موجود نیست!")
         return
@@ -64,7 +70,7 @@ async def show_events(message: types.Message):
 
 async def show_visits(message: types.Message):
     from database.db import get_visits
-    visits = get_visits()
+    visits = await get_visits()
     if not visits:
         await message.reply("هیچ بازدیدی موجود نیست!")
         return
@@ -75,7 +81,7 @@ async def show_visits(message: types.Message):
 
 async def show_profile(message: types.Message):
     from database.db import get_user
-    user = get_user(str(message.from_user.id))
+    user = await get_user(str(message.from_user.id))
     if not user or not user['registered']:
         await message.reply("لطفاً اول ثبت‌نام کن! از '📝 ثبت‌نام دوره/بازدید' استفاده کن.")
         return
@@ -84,7 +90,7 @@ async def show_profile(message: types.Message):
         f"اسم: {user['name']}\n"
         f"رشته: {user['field']}\n"
         f"شماره دانشجویی: {user['student_id']}\n"
-        f"تلفن: {user['phone']}\n"
+        ف"تلفن: {user['phone']}\n"
         f"ایمیل: {user['email']}"
     )
     await message.reply(response, reply_markup=main_menu)
@@ -103,17 +109,41 @@ def register_handlers(dp: Dispatcher):
     register_register_handlers(dp)
     register_contact_handlers(dp)
 
+async def on_startup(_):
+    bot = Bot(token=BOT_TOKEN)
+    webhook_info = await bot.get_webhook_info()
+    if webhook_info.url != WEBHOOK_URL:
+        await bot.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+    await setup_database()
+    logger.info("Bot started")
+
+async def handle_webhook(request):
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher(storage=MemoryStorage())
+    register_handlers(dp)
+    update = types.Update(**(await request.json()))
+    await dp.feed_update(bot=bot, update=update)
+    return web.Response()
+
 async def main():
     try:
         if not BOT_TOKEN or not ADMIN_ID:
-            logger.error("BOT_TOKEN or ADMIN_ID not set in .env")
+            logger.error("BOT_TOKEN or ADMIN_ID not set")
             return
-        bot = Bot(token=BOT_TOKEN)
-        dp = Dispatcher(storage=MemoryStorage())
-        register_handlers(dp)
-        setup_database()
-        logger.info("Starting polling...")
-        await dp.start_polling(bot)
+
+        app = web.Application()
+        app.add_routes([web.post(WEBHOOK_PATH, handle_webhook)])
+        app.on_startup.append(on_startup)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", PORT)
+        await site.start()
+        logger.info(f"Server started on port {PORT}")
+
+        await asyncio.Event().wait()
+
     except Exception as e:
         logger.error(f"Bot crashed: {e}")
 
