@@ -1,230 +1,171 @@
-import sqlite3
-import os
 import logging
-from contextlib import contextmanager
+from motor.motor_asyncio import AsyncIOMotorClient
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
 class DatabaseError(Exception):
     pass
 
-DB_PATH = "sci_bot.db"
+# URL دیتابیس رو توی دیپلوی تنظیم می‌کنیم
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb+srv://botuser:yourpassword@cluster0.abcdef.mongodb.net/ieee_bot?retryWrites=true&w=majority")
+DB_NAME = "ieee_bot"
 
-def get_connection():
+# اتصال به MongoDB
+client = AsyncIOMotorClient(MONGODB_URL)
+db = client[DB_NAME]
+
+async def setup_database():
+    """تنظیم اولیه دیتابیس - MongoDB خودش کالکشن‌ها رو موقع استفاده می‌سازه"""
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except sqlite3.Error as e:
-        logger.error(f"Error connecting to database: {str(e)}")
-        raise DatabaseError("Cannot connect to database")
+        # چک کردن اتصال
+        await client.server_info()
+        logger.info("Connected to MongoDB successfully")
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {str(e)}")
+        raise DatabaseError("Cannot connect to MongoDB")
 
-@contextmanager
-def transaction():
-    with get_connection() as conn:
-        try:
-            yield conn
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Transaction rolled back due to: {str(e)}")
-            raise
+@asynccontextmanager
+async def transaction():
+    """تراکنش‌ها توی MongoDB به صورت دستی مدیریت می‌شن"""
+    session = await client.start_session()
+    try:
+        async with session.start_transaction():
+            yield db
+            await session.commit_transaction()
+    except Exception as e:
+        await session.abort_transaction()
+        logger.error(f"Transaction rolled back due to: {str(e)}")
+        raise
+    finally:
+        await session.end_session()
 
-def setup_database():
-    with transaction() as conn:
-        c = conn.cursor()
-        
-        c.execute('''CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT PRIMARY KEY,
-            name TEXT,
-            field TEXT,
-            student_id TEXT,
-            phone TEXT,
-            email TEXT,
-            registered INTEGER DEFAULT 0
-        )''')
-        
-        c.execute('''CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            date TEXT NOT NULL,
-            description TEXT,
-            photo TEXT
-        )''')
-        
-        c.execute('''CREATE TABLE IF NOT EXISTS courses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            cost INTEGER NOT NULL,
-            description TEXT,
-            photo TEXT
-        )''')
-        
-        c.execute('''CREATE TABLE IF NOT EXISTS visits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            cost INTEGER NOT NULL,
-            description TEXT,
-            photo TEXT
-        )''')
-        
-        c.execute('''CREATE TABLE IF NOT EXISTS registrations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            type TEXT NOT NULL,
-            item_title TEXT NOT NULL,
-            payment_photo TEXT,
-            status TEXT DEFAULT 'pending',
-            FOREIGN KEY (user_id) REFERENCES users (user_id)
-        )''')
-        
-        # جدول جدید برای پیام‌های تماس
-        c.execute('''CREATE TABLE IF NOT EXISTS contacts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            message TEXT NOT NULL,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (user_id)
-        )''')
-        
-        c.execute('''ALTER TABLE events ADD COLUMN photo TEXT''') if not any(col[1] == "photo" for col in c.execute("PRAGMA table_info(events)")) else None
-        c.execute('''ALTER TABLE courses ADD COLUMN photo TEXT''') if not any(col[1] == "photo" for col in c.execute("PRAGMA table_info(courses)")) else None
-        c.execute('''ALTER TABLE visits ADD COLUMN photo TEXT''') if not any(col[1] == "photo" for col in c.execute("PRAGMA table_info(visits)")) else None
-        
-        c.execute("CREATE INDEX IF NOT EXISTS idx_registrations_user_id ON registrations(user_id)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_registrations_status ON registrations(status)")
-        
-        logger.info("Database setup completed with indices and photo columns")
+async def get_user(user_id: str):
+    user = await db.users.find_one({"user_id": user_id})
+    return user
 
-def get_user(user_id: str):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-        return c.fetchone()
+async def update_user(user_id: str, data: dict):
+    data["user_id"] = user_id
+    data["registered"] = 1
+    await db.users.replace_one({"user_id": user_id}, data, upsert=True)
+    logger.info(f"User updated: {user_id}")
 
-def update_user(user_id: str, data: dict):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute('''INSERT OR REPLACE INTO users (user_id, name, field, student_id, phone, email, registered)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)''', 
-                  (user_id, data.get("name"), data.get("field"), data.get("student_id"), 
-                   data.get("phone"), data.get("email"), 1))
-        logger.info(f"User updated: {user_id}")
+async def get_events():
+    events = await db.events.find().to_list(None)
+    return events
 
-def get_events():
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("SELECT title, date, description, photo FROM events")
-        events = c.fetchall()
-        return [{"title": e["title"], "date": e["date"], "description": e["description"], "photo": e["photo"]} for e in events]
+async def add_event(title: str, date: str, description: str, photo: str = None):
+    event = {"title": title, "date": date, "description": description, "photo": photo}
+    await db.events.insert_one(event)
+    logger.info(f"Event added: {title}")
 
-def add_event(title: str, date: str, description: str, photo: str = None):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO events (title, date, description, photo) VALUES (?, ?, ?, ?)", 
-                  (title, date, description, photo))
-        logger.info(f"Event added: {title}")
+async def get_courses():
+    courses = await db.courses.find().to_list(None)
+    return courses
 
-def get_courses():
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("SELECT title, cost, description, photo FROM courses")
-        courses = c.fetchall()
-        return [{"title": c["title"], "cost": c["cost"], "description": c["description"], "photo": c["photo"]} for c in courses]
-
-def add_course(*, title: str, cost: int, description: str, photo: str = None):
+async def add_course(*, title: str, cost: int, description: str, photo: str = None):
     if not title or len(title.strip()) < 3:
         raise DatabaseError("عنوان دوره باید حداقل ۳ کاراکتر باشد")
     if cost < 0:
         raise DatabaseError("هزینه نمی‌تواند منفی باشد")
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO courses (title, cost, description, photo) VALUES (?, ?, ?, ?)", 
-                  (title, cost, description, photo))
-        logger.info(f"Course added: {title}, cost={cost}, desc={description}")
+    course = {"title": title, "cost": cost, "description": description, "photo": photo}
+    await db.courses.insert_one(course)
+    logger.info(f"Course added: {title}, cost={cost}, desc={description}")
 
-def get_visits():
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("SELECT title, cost, description, photo FROM visits")
-        visits = c.fetchall()
-        return [{"title": v["title"], "cost": v["cost"], "description": v["description"], "photo": v["photo"]} for v in visits]
+async def get_visits():
+    visits = await db.visits.find().to_list(None)
+    return visits
 
-def add_visit(title: str, cost: int, description: str, photo: str = None):
+async def add_visit(title: str, cost: int, description: str, photo: str = None):
     if not title or len(title.strip()) < 3:
         raise DatabaseError("عنوان بازدید باید حداقل ۳ کاراکتر باشد")
     if cost < 0:
         raise DatabaseError("هزینه نمی‌تواند منفی باشد")
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO visits (title, cost, description, photo) VALUES (?, ?, ?, ?)", 
-                  (title, cost, description, photo))
-        logger.info(f"Visit added: {title}, cost={cost}, desc={description}")
+    visit = {"title": title, "cost": cost, "description": description, "photo": photo}
+    await db.visits.insert_one(visit)
+    logger.info(f"Visit added: {title}, cost={cost}, desc={description}")
 
-def add_registration(user_id: str, reg_type: str, item_title: str, payment_photo: str) -> int:
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO registrations (user_id, type, item_title, payment_photo) VALUES (?, ?, ?, ?)",
-                  (user_id, reg_type, item_title, payment_photo))
-        reg_id = c.lastrowid
-        logger.info(f"Registration added: {reg_id} for user {user_id}")
-        return reg_id
+async def add_registration(user_id: str, reg_type: str, item_title: str, payment_photo: str) -> str:
+    registration = {
+        "user_id": user_id,
+        "type": reg_type,
+        "item_title": item_title,
+        "payment_photo": payment_photo,
+        "status": "pending"
+    }
+    result = await db.registrations.insert_one(registration)
+    reg_id = str(result.inserted_id)
+    logger.info(f"Registration added: {reg_id} for user {user_id}")
+    return reg_id
 
-def get_registration(reg_id: int):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("SELECT * FROM registrations WHERE id = ?", (reg_id,))
-        return c.fetchone()
+async def get_registration(reg_id: str):
+    from bson import ObjectId
+    registration = await db.registrations.find_one({"_id": ObjectId(reg_id)})
+    return registration
 
-def update_registration_status(reg_id: int, status: str):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("UPDATE registrations SET status = ? WHERE id = ?", (status, reg_id))
-        logger.info(f"Registration {reg_id} status updated to {status}")
+async def update_registration_status(reg_id: str, status: str):
+    from bson import ObjectId
+    await db.registrations.update_one({"_id": ObjectId(reg_id)}, {"$set": {"status": status}})
+    logger.info(f"Registration {reg_id} status updated to {status}")
 
-def get_all_registrations():
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute('''SELECT r.id, r.user_id, r.type, r.item_title, r.status, u.name 
-                     FROM registrations r 
-                     JOIN users u ON r.user_id = u.user_id 
-                     WHERE u.registered = 1''')
-        registrations = c.fetchall()
-        return registrations
+async def get_all_registrations():
+    registrations = await db.registrations.aggregate([
+        {"$lookup": {
+            "from": "users",
+            "localField": "user_id",
+            "foreignField": "user_id",
+            "as": "user"
+        }},
+        {"$match": {"user.registered": 1}},
+        {"$unwind": "$user"},
+        {"$project": {
+            "id": "$_id",
+            "user_id": 1,
+            "type": 1,
+            "item_title": 1,
+            "status": 1,
+            "name": "$user.name"
+        }}
+    ]).to_list(None)
+    return registrations
 
-def delete_course(title: str):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM courses WHERE title = ?", (title,))
-        c.execute("DELETE FROM registrations WHERE type = 'course' AND item_title = ?", (title,))
-        logger.info(f"Course {title} and related registrations deleted")
+async def delete_course(title: str):
+    await db.courses.delete_one({"title": title})
+    await db.registrations.delete_many({"type": "course", "item_title": title})
+    logger.info(f"Course {title} and related registrations deleted")
 
-def delete_visit(title: str):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM visits WHERE title = ?", (title,))
-        c.execute("DELETE FROM registrations WHERE type = 'visit' AND item_title = ?", (title,))
-        logger.info(f"Visit {title} and related registrations deleted")
+async def delete_visit(title: str):
+    await db.visits.delete_one({"title": title})
+    await db.registrations.delete_many({"type": "visit", "item_title": title})
+    logger.info(f"Visit {title} and related registrations deleted")
 
-def get_all_registered_users():
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("SELECT user_id FROM users WHERE registered = 1")
-        users = c.fetchall()
-        return [user["user_id"] for user in users]
+async def get_all_registered_users():
+    users = await db.users.find({"registered": 1}, {"user_id": 1}).to_list(None)
+    return [user["user_id"] for user in users]
 
-# توابع جدید برای پیام‌های تماس
-def add_contact_message(user_id: str, message: str):
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO contacts (user_id, message) VALUES (?, ?)", (user_id, message))
-        logger.info(f"Contact message added for user {user_id}")
+async def add_contact_message(user_id: str, message: str):
+    contact = {"user_id": user_id, "message": message, "timestamp": datetime.datetime.utcnow()}
+    await db.contacts.insert_one(contact)
+    logger.info(f"Contact message added for user {user_id}")
 
-def get_all_contact_messages():
-    with transaction() as conn:
-        c = conn.cursor()
-        c.execute('''SELECT c.id, c.user_id, c.message, c.timestamp, u.name 
-                     FROM contacts c 
-                     JOIN users u ON c.user_id = u.user_id''')
-        messages = c.fetchall()
-        return [{"id": m["id"], "user_id": m["user_id"], "message": m["message"], "timestamp": m["timestamp"], "name": m["name"]} for m in messages]
+async def get_all_contact_messages():
+    messages = await db.contacts.aggregate([
+        {"$lookup": {
+            "from": "users",
+            "localField": "user_id",
+            "foreignField": "user_id",
+            "as": "user"
+        }},
+        {"$unwind": "$user"},
+        {"$project": {
+            "id": "$_id",
+            "user_id": 1,
+            "message": 1,
+            "timestamp": 1,
+            "name": "$user.name"
+        }}
+    ]).to_list(None)
+    return messages
+
+# اضافه کردن datetime برای timestamp
+import datetime
