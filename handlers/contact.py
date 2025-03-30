@@ -1,6 +1,10 @@
 from aiogram import Router, types, Dispatcher
 from aiogram.filters import Command
 from database.db import add_contact_message
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = Router()
 
@@ -12,7 +16,8 @@ CONTACT_INFO = """
 📩 *لطفاً پیام خود را ارسال کنید، تیم ما در اسرع وقت پاسخ خواهد داد\.*
 """
 
-ADMIN_ID = 100851995  # 🔹 آی‌دی عددی ادمین را اینجا وارد کنید
+# استفاده از لیست ADMINS به جای یک ADMIN_ID
+ADMINS = [int(x) for x in os.getenv("ADMINS", "0").split(",") if x]
 user_contacting = set()
 
 @router.message(Command("contact"))
@@ -29,8 +34,8 @@ async def forward_to_admin(message: types.Message):
     if not message.text:
         await message.answer("⚠️ لطفاً فقط پیام متنی ارسال کنید!")
         return
-    add_contact_message(str(message.from_user.id), message.text)
-    await message.forward(ADMIN_ID)
+    await add_contact_message(str(message.from_user.id), message.text)  # اضافه کردن await
+    await message.forward(ADMINS[0])  # ارسال به اولین ادمین (می‌تونی تغییر بدی)
     await message.answer("✅ پیام شما به مدیریت ارسال شد!")
     user_contacting.remove(message.from_user.id)
 
