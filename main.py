@@ -90,7 +90,7 @@ async def show_profile(message: types.Message):
         f"اسم: {user['name']}\n"
         f"رشته: {user['field']}\n"
         f"شماره دانشجویی: {user['student_id']}\n"
-        ف"تلفن: {user['phone']}\n"
+        f"تلفن: {user['phone']}\n" 
         f"ایمیل: {user['email']}"
     )
     await message.reply(response, reply_markup=main_menu)
