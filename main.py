@@ -19,11 +19,15 @@ logger = logging.getLogger(__name__)
 
 # متغیرهای محیطی
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+ADMINS = [int(x) for x in os.getenv("ADMINS", "0").split(",") if x]  # تغییر به لیست ADMINS
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://anjoman.onrender.com")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 PORT = int(os.getenv("PORT", 8000))
+
+# تعریف سراسری Bot و Dispatcher
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
 
 CONTACT_INFO = """
 📞 *راه‌های ارتباطی با ما:*
@@ -90,7 +94,7 @@ async def show_profile(message: types.Message):
         f"اسم: {user['name']}\n"
         f"رشته: {user['field']}\n"
         f"شماره دانشجویی: {user['student_id']}\n"
-        f"تلفن: {user['phone']}\n" 
+        f"تلفن: {user['phone']}\n"
         f"ایمیل: {user['email']}"
     )
     await message.reply(response, reply_markup=main_menu)
@@ -110,26 +114,23 @@ def register_handlers(dp: Dispatcher):
     register_contact_handlers(dp)
 
 async def on_startup(_):
-    bot = Bot(token=BOT_TOKEN)
     webhook_info = await bot.get_webhook_info()
     if webhook_info.url != WEBHOOK_URL:
         await bot.set_webhook(url=WEBHOOK_URL)
         logger.info(f"Webhook set to {WEBHOOK_URL}")
     await setup_database()
+    register_handlers(dp)  # ثبت Handlerها فقط یک بار موقع استارتاپ
     logger.info("Bot started")
 
 async def handle_webhook(request):
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
-    register_handlers(dp)
     update = types.Update(**(await request.json()))
     await dp.feed_update(bot=bot, update=update)
-    return web.Response()
+    return web.Response(text="OK", status=200)
 
 async def main():
     try:
-        if not BOT_TOKEN or not ADMIN_ID:
-            logger.error("BOT_TOKEN or ADMIN_ID not set")
+        if not BOT_TOKEN:
+            logger.error("BOT_TOKEN not set")
             return
 
         app = web.Application()
