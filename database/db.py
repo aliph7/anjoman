@@ -8,8 +8,8 @@ class DatabaseError(Exception):
     pass
 
 # URL دیتابیس رو توی دیپلوی تنظیم می‌کنیم
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb+srv://botuser:yourpassword@cluster0.abcdef.mongodb.net/ieee_bot?retryWrites=true&w=majority")
-DB_NAME = "ieee_bot"
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb+srv://botuser:84858485@cluster0.w9dow.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+DB_NAME = "anjoman_bot"
 
 # اتصال به MongoDB
 client = AsyncIOMotorClient(MONGODB_URL)
