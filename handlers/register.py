@@ -6,7 +6,7 @@ from database.db import get_user, update_user, get_courses, get_visits, add_regi
 import logging
 import os
 from dotenv import load_dotenv
-from keyboards import main_menu  # ایمپورت از keyboards.py
+from keyboards import main_menu
 
 load_dotenv()
 
@@ -23,7 +23,8 @@ class RegisterStates(StatesGroup):
     waiting_for_visit = State()
     waiting_for_receipt = State()
 
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+# استفاده از لیست ADMINS به جای یک ADMIN_ID
+ADMINS = [int(x) for x in os.getenv("ADMINS", "0").split(",") if x]
 
 register_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -39,8 +40,8 @@ cancel_button = ReplyKeyboardMarkup(
 )
 
 async def register_cmd(message: types.Message, state: FSMContext):
-    user = get_user(str(message.from_user.id))
-    if user and user[6]:  # registered = 1
+    user = await get_user(str(message.from_user.id))  # اضافه کردن await
+    if user and user.get("registered", 0):  # چک کردن registered به‌صورت امن
         await message.reply("به بخش ثبت‌نام خوش اومدی!", reply_markup=register_menu)
         await state.set_state(RegisterStates.main_menu)
     else:
@@ -89,7 +90,7 @@ async def process_email(message: types.Message, state: FSMContext):
         await state.clear()
         return
     data = await state.get_data()
-    update_user(str(message.from_user.id), {
+    await update_user(str(message.from_user.id), {  # اضافه کردن await
         "name": data["name"],
         "field": data["field"],
         "student_id": data["student_id"],
@@ -104,7 +105,7 @@ async def return_to_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
 
 async def course_register(message: types.Message, state: FSMContext):
-    courses = get_courses()
+    courses = await get_courses()  # اضافه کردن await
     if not courses:
         await message.reply("هیچ دوره‌ای موجود نیست!", reply_markup=register_menu)
         return
@@ -120,7 +121,7 @@ async def process_course(message: types.Message, state: FSMContext):
         await message.reply("برگشتی به منوی ثبت‌نام:", reply_markup=register_menu)
         await state.set_state(RegisterStates.main_menu)
         return
-    courses = get_courses()
+    courses = await get_courses()  # اضافه کردن await
     course = next((c for c in courses if c["title"] == message.text), None)
     if not course:
         await message.reply("این دوره وجود نداره! دوباره انتخاب کن:")
@@ -135,7 +136,7 @@ async def process_course(message: types.Message, state: FSMContext):
     await state.set_state(RegisterStates.waiting_for_receipt)
 
 async def visit_register(message: types.Message, state: FSMContext):
-    visits = get_visits()
+    visits = await get_visits()  # اضافه کردن await
     if not visits:
         await message.reply("هیچ بازدیدی موجود نیست!", reply_markup=register_menu)
         return
@@ -151,7 +152,7 @@ async def process_visit(message: types.Message, state: FSMContext):
         await message.reply("برگشتی به منوی ثبت‌نام:", reply_markup=register_menu)
         await state.set_state(RegisterStates.main_menu)
         return
-    visits = get_visits()
+    visits = await get_visits()  # اضافه کردن await
     visit = next((v for v in visits if v["title"] == message.text), None)
     if not visit:
         await message.reply("این بازدید وجود نداره! دوباره انتخاب کن:")
@@ -174,11 +175,11 @@ async def process_receipt(message: types.Message, state: FSMContext):
         await message.reply("لطفاً عکس فیش پرداخت رو بفرست!", reply_markup=cancel_button)
         return
     data = await state.get_data()
-    reg_id = add_registration(str(message.from_user.id), data["item_type"], data["selected_item"], message.photo[-1].file_id)
+    reg_id = await add_registration(str(message.from_user.id), data["item_type"], data["selected_item"], message.photo[-1].file_id)  # اضافه کردن await
     await message.reply("✅ فیشت ثبت شد! منتظر تأیید ادمین باش.", reply_markup=main_menu)
     bot = message.bot
     await bot.send_photo(
-        ADMIN_ID,
+        ADMINS[0],  # فرض می‌کنیم اولین ادمین پیام رو دریافت کنه
         message.photo[-1].file_id,
         caption=f"درخواست ثبت‌نام\nکاربر: {message.from_user.id}\n{data['item_type']}: {data['selected_item']}\nID: {reg_id}"
     )
