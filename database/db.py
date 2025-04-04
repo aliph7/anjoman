@@ -2,13 +2,18 @@ import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 import os
+from dotenv import load_dotenv
+import datetime
+
+# لود متغیرهای محیطی قبل از استفاده
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 class DatabaseError(Exception):
     pass
 
-# URL دیتابیس رو توی دیپلوی تنظیم می‌کنیم
+# URL دیتابیس و نام دیتابیس
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb+srv://botuser:84858485@cluster0.w9dow.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 DB_NAME = "anjoman_bot"
 
@@ -43,6 +48,7 @@ async def transaction():
 
 async def get_user(user_id: str):
     user = await db.users.find_one({"user_id": user_id})
+    logger.debug(f"Get user {user_id}: {user}")
     return user
 
 async def update_user(user_id: str, data: dict):
@@ -53,6 +59,7 @@ async def update_user(user_id: str, data: dict):
 
 async def get_events():
     events = await db.events.find().to_list(None)
+    logger.debug(f"Events retrieved: {len(events)} items")
     return events
 
 async def add_event(title: str, date: str, description: str, photo: str = None):
@@ -62,6 +69,7 @@ async def add_event(title: str, date: str, description: str, photo: str = None):
 
 async def get_courses():
     courses = await db.courses.find().to_list(None)
+    logger.debug(f"Courses retrieved: {len(courses)} items")
     return courses
 
 async def add_course(*, title: str, cost: int, description: str, photo: str = None):
@@ -75,6 +83,7 @@ async def add_course(*, title: str, cost: int, description: str, photo: str = No
 
 async def get_visits():
     visits = await db.visits.find().to_list(None)
+    logger.debug(f"Visits retrieved: {len(visits)} items")
     return visits
 
 async def add_visit(title: str, cost: int, description: str, photo: str = None):
@@ -102,6 +111,7 @@ async def add_registration(user_id: str, reg_type: str, item_title: str, payment
 async def get_registration(reg_id: str):
     from bson import ObjectId
     registration = await db.registrations.find_one({"_id": ObjectId(reg_id)})
+    logger.debug(f"Get registration {reg_id}: {registration}")
     return registration
 
 async def update_registration_status(reg_id: str, status: str):
@@ -128,6 +138,7 @@ async def get_all_registrations():
             "name": "$user.name"
         }}
     ]).to_list(None)
+    logger.debug(f"All registrations retrieved: {len(registrations)} items")
     return registrations
 
 async def delete_course(title: str):
@@ -142,6 +153,7 @@ async def delete_visit(title: str):
 
 async def get_all_registered_users():
     users = await db.users.find({"registered": 1}, {"user_id": 1}).to_list(None)
+    logger.debug(f"Registered users retrieved: {len(users)} items")
     return [user["user_id"] for user in users]
 
 async def add_contact_message(user_id: str, message: str):
@@ -166,7 +178,5 @@ async def get_all_contact_messages():
             "name": "$user.name"
         }}
     ]).to_list(None)
+    logger.debug(f"Contact messages retrieved: {len(messages)} items")
     return messages
-
-# اضافه کردن datetime برای timestamp
-import datetime
