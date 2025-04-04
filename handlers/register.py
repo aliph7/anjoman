@@ -5,6 +5,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from database.db import get_user, update_user, get_courses, get_visits, add_registration
 import logging
 import os
+import asyncio
 from dotenv import load_dotenv
 from keyboards import main_menu
 
@@ -23,7 +24,6 @@ class RegisterStates(StatesGroup):
     waiting_for_visit = State()
     waiting_for_receipt = State()
 
-# استفاده از لیست ADMINS به جای یک ADMIN_ID
 ADMINS = [int(x) for x in os.getenv("ADMINS", "0").split(",") if x]
 
 register_menu = ReplyKeyboardMarkup(
@@ -40,8 +40,8 @@ cancel_button = ReplyKeyboardMarkup(
 )
 
 async def register_cmd(message: types.Message, state: FSMContext):
-    user = await get_user(str(message.from_user.id))  # اضافه کردن await
-    if user and user.get("registered", 0):  # چک کردن registered به‌صورت امن
+    user = await get_user(str(message.from_user.id))
+    if user and user.get("registered", 0):
         await message.reply("به بخش ثبت‌نام خوش اومدی!", reply_markup=register_menu)
         await state.set_state(RegisterStates.main_menu)
     else:
@@ -90,7 +90,7 @@ async def process_email(message: types.Message, state: FSMContext):
         await state.clear()
         return
     data = await state.get_data()
-    await update_user(str(message.from_user.id), {  # اضافه کردن await
+    await update_user(str(message.from_user.id), {
         "name": data["name"],
         "field": data["field"],
         "student_id": data["student_id"],
@@ -105,38 +105,39 @@ async def return_to_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
 
 async def course_register(message: types.Message, state: FSMContext):
-    courses = await get_courses()  # اضافه کردن await
+    courses = await get_courses()
     if not courses:
-        await message.reply("هیچ دوره‌ای موجود نیست!", reply_markup=register_menu)
+        await message.reply("هیچ دوره‌ای موجود نیست!", reply_markup=main_menu)
         return
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=c["title"])] for c in courses] + [[KeyboardButton(text="🔙 بازگشت")]],
-        resize_keyboard=True
-    )
-    await message.reply("دوره مورد نظرت رو انتخاب کن:", reply_markup=kb)
-    await state.set_state(RegisterStates.waiting_for_course)
-
-async def process_course(message: types.Message, state: FSMContext):
-    if message.text == "🔙 بازگشت":
-        await message.reply("برگشتی به منوی ثبت‌نام:", reply_markup=register_menu)
-        await state.set_state(RegisterStates.main_menu)
-        return
-    courses = await get_courses()  # اضافه کردن await
-    course = next((c for c in courses if c["title"] == message.text), None)
-    if not course:
-        await message.reply("این دوره وجود نداره! دوباره انتخاب کن:")
-        return
-    await state.update_data(selected_item=message.text, item_type="course", cost=course["cost"])
-    await message.reply(
-        f"هزینه دوره '{message.text}': {course['cost']} تومان\n"
-        "شماره حساب: 1234-5678-9012-3456\n"
-        "لطفاً مبلغ رو پرداخت کن و عکس فیش رو بفرست:",
-        reply_markup=cancel_button
-    )
-    await state.set_state(RegisterStates.waiting_for_receipt)
+    
+    # ارسال هر دوره به صورت پیام جداگانه
+    for course in courses:
+        text = (
+            f"📚 دوره آموزشی:\n"
+            f"عنوان: {course['title']}\n"
+            f"هزینه: {course['cost']} تومان\n"
+            f"توضیحات: {course['description']}"
+        )
+        if course.get("photo"):
+            await message.bot.send_photo(
+                chat_id=message.chat.id,
+                photo=course["photo"],
+                caption=text,
+                parse_mode="Markdown"
+            )
+        else:
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text=text,
+                parse_mode="Markdown"
+            )
+        await asyncio.sleep(0.5)
+    
+    await message.reply("این‌ها دوره‌های موجود بودن!", reply_markup=main_menu)
+    await state.clear()
 
 async def visit_register(message: types.Message, state: FSMContext):
-    visits = await get_visits()  # اضافه کردن await
+    visits = await get_visits()
     if not visits:
         await message.reply("هیچ بازدیدی موجود نیست!", reply_markup=register_menu)
         return
@@ -152,7 +153,7 @@ async def process_visit(message: types.Message, state: FSMContext):
         await message.reply("برگشتی به منوی ثبت‌نام:", reply_markup=register_menu)
         await state.set_state(RegisterStates.main_menu)
         return
-    visits = await get_visits()  # اضافه کردن await
+    visits = await get_visits()
     visit = next((v for v in visits if v["title"] == message.text), None)
     if not visit:
         await message.reply("این بازدید وجود نداره! دوباره انتخاب کن:")
@@ -175,11 +176,11 @@ async def process_receipt(message: types.Message, state: FSMContext):
         await message.reply("لطفاً عکس فیش پرداخت رو بفرست!", reply_markup=cancel_button)
         return
     data = await state.get_data()
-    reg_id = await add_registration(str(message.from_user.id), data["item_type"], data["selected_item"], message.photo[-1].file_id)  # اضافه کردن await
+    reg_id = await add_registration(str(message.from_user.id), data["item_type"], data["selected_item"], message.photo[-1].file_id)
     await message.reply("✅ فیشت ثبت شد! منتظر تأیید ادمین باش.", reply_markup=main_menu)
     bot = message.bot
     await bot.send_photo(
-        ADMINS[0],  # فرض می‌کنیم اولین ادمین پیام رو دریافت کنه
+        ADMINS[0],
         message.photo[-1].file_id,
         caption=f"درخواست ثبت‌نام\nکاربر: {message.from_user.id}\n{data['item_type']}: {data['selected_item']}\nID: {reg_id}"
     )
@@ -195,6 +196,5 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(course_register, lambda message: message.text == "📚 ثبت‌نام دوره", RegisterStates.main_menu)
     dp.message.register(visit_register, lambda message: message.text == "🏢 ثبت‌نام بازدید", RegisterStates.main_menu)
     dp.message.register(return_to_main_menu, lambda message: message.text == "🔙 بازگشت به منوی اصلی", RegisterStates.main_menu)
-    dp.message.register(process_course, RegisterStates.waiting_for_course)
     dp.message.register(process_visit, RegisterStates.waiting_for_visit)
     dp.message.register(process_receipt, RegisterStates.waiting_for_receipt)
