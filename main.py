@@ -30,10 +30,11 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 CONTACT_INFO = """
-📞 **راه‌های ارتباطی با ما:**\n
-📌 تلگرام: [ارتباط با ادمین](https://t.me/Tut_ECS)\n
-📌 کانال انجمن: [ورود به کانال](https://t.me/electrical_sut)\n
-📩 *لطفاً پیام خود را ارسال کنید، تیم ما در اسرع وقت پاسخ خواهد داد\.*
+📞 *راه‌های ارتباطی با ما:*
+📌 ایمیل: `support@example.com`
+📌 تلگرام: [ارتباط با ادمین](https://t.me/admin_username)
+📌 گروه انجمن: [ورود به گروه](https://t.me/group_link)
+📩 _لطفاً پیام خود را ارسال کنید، تیم ما در اسرع وقت پاسخ خواهد داد._
 """
 
 # تابع کمکی برای فرار کاراکترهای خاص در MarkdownV2
@@ -63,32 +64,30 @@ async def show_courses(message: types.Message):
         await message.reply("هیچ دوره‌ای موجود نیست!", reply_markup=main_menu)
         return
     
-    # ارسال هر دوره به صورت پیام جداگانه
     for course in courses:
-        # فرمت‌بندی و فرار کاراکترها
-        description = course["description"][:800]  # محدود به 800 کاراکتر
+        description = course["description"][:800]
         text = (
-            "📚 *دوره آموزشی:*\n"  # باز و بسته کردن درست Markdown
+            "📚 *دوره آموزشی:*\n"
             f"*عنوان:* {escape_markdown_v2(course['title'])}\n"
             f"*هزینه:* {escape_markdown_v2(str(course['cost']))} تومان\n"
             f"*توضیحات:* {escape_markdown_v2(description)}"
         )
         logger.debug(f"Sending course: {course['title']}, photo: {course.get('photo')}, caption length: {len(text)}")
         try:
-            if course.get("photo"):  # اگه عکس داره
+            if course.get("photo"):
                 await message.bot.send_photo(
                     chat_id=message.chat.id,
                     photo=course["photo"],
                     caption=text,
                     parse_mode="MarkdownV2"
                 )
-            else:  # اگه عکس نداره
+            else:
                 await message.bot.send_message(
                     chat_id=message.chat.id,
                     text=text,
                     parse_mode="MarkdownV2"
                 )
-            await asyncio.sleep(0.5)  # تأخیر برای جلوگیری از اسپم
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error sending course {course['title']}: {str(e)}")
             await message.reply(f"خطا در نمایش دوره {course['title']}", reply_markup=main_menu)
@@ -136,6 +135,11 @@ async def show_profile(message: types.Message):
 async def show_contact(message: types.Message):
     await message.reply(CONTACT_INFO, parse_mode="Markdown", disable_web_page_preview=True, reply_markup=main_menu)
 
+# تابع جدید برای پینگ
+async def handle_ping(request):
+    logger.info("Received ping request")
+    return web.Response(text="Pong", status=200)
+
 def register_handlers(dp: Dispatcher):
     dp.message.register(start_cmd, Command(commands=["start"]))
     dp.message.register(show_courses, lambda msg: msg.text == "📚 دوره‌های آموزشی")
@@ -168,7 +172,10 @@ async def main():
             return
 
         app = web.Application()
-        app.add_routes([web.post(WEBHOOK_PATH, handle_webhook)])
+        app.add_routes([
+            web.post(WEBHOOK_PATH, handle_webhook),
+            web.get("/ping", handle_ping)  # مسیر جدید برای پینگ
+        ])
         app.on_startup.append(on_startup)
 
         runner = web.AppRunner(app)
