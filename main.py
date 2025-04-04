@@ -54,12 +54,33 @@ async def show_courses(message: types.Message):
     from database.db import get_courses
     courses = await get_courses()
     if not courses:
-        await message.reply("هیچ دوره‌ای موجود نیست!")
+        await message.reply("هیچ دوره‌ای موجود نیست!", reply_markup=main_menu)
         return
-    response = "📚 دوره‌های آموزشی:\n\n"
+    
+    # ارسال هر دوره به صورت پیام جداگانه
     for course in courses:
-        response += f"عنوان: {course['title']}\nهزینه: {course['cost']} تومان\nتوضیحات: {course['description']}\n\n"
-    await message.reply(response, reply_markup=main_menu)
+        text = (
+            f"📚 دوره آموزشی:\n"
+            f"عنوان: {course['title']}\n"
+            f"هزینه: {course['cost']} تومان\n"
+            f"توضیحات: {course['description']}"
+        )
+        if course.get("photo"):  # اگه عکس داره
+            await message.bot.send_photo(
+                chat_id=message.chat.id,
+                photo=course["photo"],
+                caption=text,
+                parse_mode="Markdown"
+            )
+        else:  # اگه عکس نداره
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text=text,
+                parse_mode="Markdown"
+            )
+        await asyncio.sleep(0.5)  # تأخیر برای جلوگیری از اسپم
+    
+    await message.reply("این‌ها دوره‌های موجود بودن!", reply_markup=main_menu)
 
 async def show_events(message: types.Message):
     from database.db import get_events
