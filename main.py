@@ -37,6 +37,13 @@ CONTACT_INFO = """
 📩 _لطفاً پیام خود را ارسال کنید، تیم ما در اسرع وقت پاسخ خواهد داد._
 """
 
+# تابع کمکی برای فرار کاراکترهای خاص در MarkdownV2
+def escape_markdown_v2(text: str) -> str:
+    reserved_chars = r"_*[]()~`>#+-=|{}.!"
+    for char in reserved_chars:
+        text = text.replace(char, f"\\{char}")
+    return text
+
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
     welcome_text = (
@@ -59,13 +66,13 @@ async def show_courses(message: types.Message):
     
     # ارسال هر دوره به صورت پیام جداگانه
     for course in courses:
-        # کوتاه کردن توضیحات و فرمت‌بندی درست
+        # فرمت‌بندی و فرار کاراکترها
         description = course["description"][:800]  # محدود به 800 کاراکتر
         text = (
             "📚 *دوره آموزشی:*\n"  # باز و بسته کردن درست Markdown
-            f"*عنوان:* {course['title']}\n"
-            f"*هزینه:* {course['cost']} تومان\n"
-            f"*توضیحات:* {description}"
+            f"*عنوان:* {escape_markdown_v2(course['title'])}\n"
+            f"*هزینه:* {escape_markdown_v2(str(course['cost']))} تومان\n"
+            f"*توضیحات:* {escape_markdown_v2(description)}"
         )
         logger.debug(f"Sending course: {course['title']}, photo: {course.get('photo')}, caption length: {len(text)}")
         try:
@@ -74,7 +81,7 @@ async def show_courses(message: types.Message):
                     chat_id=message.chat.id,
                     photo=course["photo"],
                     caption=text,
-                    parse_mode="MarkdownV2"  # استفاده از MarkdownV2 برای دقت بیشتر
+                    parse_mode="MarkdownV2"
                 )
             else:  # اگه عکس نداره
                 await message.bot.send_message(
