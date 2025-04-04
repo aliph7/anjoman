@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # متغیرهای محیطی
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMINS = [int(x) for x in os.getenv("ADMINS", "0").split(",") if x]  # تغییر به لیست ADMINS
+ADMINS = [int(x) for x in os.getenv("ADMINS", "0").split(",") if x]
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://anjoman.onrender.com")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
@@ -59,26 +59,33 @@ async def show_courses(message: types.Message):
     
     # ارسال هر دوره به صورت پیام جداگانه
     for course in courses:
+        # کوتاه کردن توضیحات و فرمت‌بندی درست
+        description = course["description"][:800]  # محدود به 800 کاراکتر
         text = (
-            f"📚 دوره آموزشی:\n"
-            f"عنوان: {course['title']}\n"
-            f"هزینه: {course['cost']} تومان\n"
-            f"توضیحات: {course['description']}"
+            "📚 *دوره آموزشی:*\n"  # باز و بسته کردن درست Markdown
+            f"*عنوان:* {course['title']}\n"
+            f"*هزینه:* {course['cost']} تومان\n"
+            f"*توضیحات:* {description}"
         )
-        if course.get("photo"):  # اگه عکس داره
-            await message.bot.send_photo(
-                chat_id=message.chat.id,
-                photo=course["photo"],
-                caption=text,
-                parse_mode="Markdown"
-            )
-        else:  # اگه عکس نداره
-            await message.bot.send_message(
-                chat_id=message.chat.id,
-                text=text,
-                parse_mode="Markdown"
-            )
-        await asyncio.sleep(0.5)  # تأخیر برای جلوگیری از اسپم
+        logger.debug(f"Sending course: {course['title']}, photo: {course.get('photo')}, caption length: {len(text)}")
+        try:
+            if course.get("photo"):  # اگه عکس داره
+                await message.bot.send_photo(
+                    chat_id=message.chat.id,
+                    photo=course["photo"],
+                    caption=text,
+                    parse_mode="MarkdownV2"  # استفاده از MarkdownV2 برای دقت بیشتر
+                )
+            else:  # اگه عکس نداره
+                await message.bot.send_message(
+                    chat_id=message.chat.id,
+                    text=text,
+                    parse_mode="MarkdownV2"
+                )
+            await asyncio.sleep(0.5)  # تأخیر برای جلوگیری از اسپم
+        except Exception as e:
+            logger.error(f"Error sending course {course['title']}: {str(e)}")
+            await message.reply(f"خطا در نمایش دوره {course['title']}", reply_markup=main_menu)
     
     await message.reply("این‌ها دوره‌های موجود بودن!", reply_markup=main_menu)
 
@@ -86,7 +93,7 @@ async def show_events(message: types.Message):
     from database.db import get_events
     events = await get_events()
     if not events:
-        await message.reply("هیچ رویدادی موجود نیست!")
+        await message.reply("هیچ رویدادی موجود نیست!", reply_markup=main_menu)
         return
     response = "🎯 رویدادها:\n\n"
     for event in events:
@@ -97,7 +104,7 @@ async def show_visits(message: types.Message):
     from database.db import get_visits
     visits = await get_visits()
     if not visits:
-        await message.reply("هیچ بازدیدی موجود نیست!")
+        await message.reply("هیچ بازدیدی موجود نیست!", reply_markup=main_menu)
         return
     response = "🏛 بازدیدها:\n\n"
     for visit in visits:
@@ -140,7 +147,7 @@ async def on_startup(_):
         await bot.set_webhook(url=WEBHOOK_URL)
         logger.info(f"Webhook set to {WEBHOOK_URL}")
     await setup_database()
-    register_handlers(dp)  # ثبت Handlerها فقط یک بار موقع استارتاپ
+    register_handlers(dp)
     logger.info("Bot started")
 
 async def handle_webhook(request):
