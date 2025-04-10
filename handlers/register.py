@@ -185,15 +185,24 @@ async def process_receipt(message: types.Message, state: FSMContext):
     if not message.photo:
         await message.reply("لطفاً عکس فیش پرداخت رو بفرست!", reply_markup=cancel_button)
         return
+    
     data = await state.get_data()
     reg_id = await add_registration(str(message.from_user.id), data["item_type"], data["selected_item"], message.photo[-1].file_id)
     await message.reply("✅ فیشت ثبت شد! منتظر تأیید ادمین باش.", reply_markup=main_menu)
     bot = message.bot
-    await bot.send_photo(
-        ADMINS[0],
-        message.photo[-1].file_id,
-        caption=f"درخواست ثبت‌نام\nکاربر: {message.from_user.id}\n{data['item_type']}: {data['selected_item']}\nID: {reg_id}"
-    )
+    
+    # ارسال به همه ادمین‌ها
+    for admin_id in ADMINS:
+        try:
+            await bot.send_photo(
+                admin_id,
+                message.photo[-1].file_id,
+                caption=f"درخواست ثبت‌نام\nکاربر: {message.from_user.id}\n{data['item_type']}: {data['selected_item']}\nID: {reg_id}"
+            )
+            logger.info(f"Notification sent successfully to admin {admin_id}")
+        except Exception as e:
+            logger.error(f"Failed to send notification to admin {admin_id}: {str(e)}")
+    
     await state.clear()
 
 def register_handlers(dp: Dispatcher):
