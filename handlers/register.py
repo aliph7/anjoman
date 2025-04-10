@@ -20,7 +20,7 @@ class RegisterStates(StatesGroup):
     waiting_for_phone = State()
     waiting_for_email = State()
     main_menu = State()
-    waiting_for_course = State()
+    waiting_for_course = State()  # برای انتخاب دوره
     waiting_for_visit = State()
     waiting_for_receipt = State()
 
@@ -117,37 +117,34 @@ async def course_register(message: types.Message, state: FSMContext):
         await message.reply("هیچ دوره‌ای موجود نیست!", reply_markup=main_menu)
         return
     
-    # ارسال هر دوره به صورت پیام جداگانه
-    for course in courses:
-        description = course["description"][:800]  # محدود کردن به 800 کاراکتر
-        text = (
-            "📚 *دوره آموزشی:*\n"
-            f"*عنوان:* {escape_markdown_v2(course['title'])}\n"
-            f"*هزینه:* {escape_markdown_v2(str(course['cost']))} تومان\n"
-            f"*توضیحات:* {escape_markdown_v2(description)}"
-        )
-        logger.debug(f"Sending course: {course['title']}, photo: {course.get('photo')}, caption length: {len(text)}")
-        try:
-            if course.get("photo"):
-                await message.bot.send_photo(
-                    chat_id=message.chat.id,
-                    photo=course["photo"],
-                    caption=text,
-                    parse_mode="MarkdownV2"  # تغییر به MarkdownV2
-                )
-            else:
-                await message.bot.send_message(
-                    chat_id=message.chat.id,
-                    text=text,
-                    parse_mode="MarkdownV2"
-                )
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.error(f"Error sending course {course['title']}: {str(e)}")
-            await message.reply(f"خطا در نمایش دوره {course['title']}", reply_markup=main_menu)
+    # نمایش دوره‌ها به صورت کیبورد برای انتخاب
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=c["title"])] for c in courses] + [[KeyboardButton(text="🔙 بازگشت")]],
+        resize_keyboard=True
+    )
+    await message.reply("دوره مورد نظرت رو انتخاب کن:", reply_markup=kb)
+    await state.set_state(RegisterStates.waiting_for_course)
+
+async def process_course(message: types.Message, state: FSMContext):
+    if message.text == "🔙 بازگشت":
+        await message.reply("برگشتی به منوی ثبت‌نام:", reply_markup=register_menu)
+        await state.set_state(RegisterStates.main_menu)
+        return
     
-    await message.reply("این‌ها دوره‌های موجود بودن!", reply_markup=main_menu)
-    await state.clear()
+    courses = await get_courses()
+    course = next((c for c in courses if c["title"] == message.text), None)
+    if not course:
+        await message.reply("این دوره وجود نداره! دوباره انتخاب کن:", reply_markup=cancel_button)
+        return
+    
+    await state.update_data(selected_item=message.text, item_type="course", cost=course["cost"])
+    text = (
+        f"هزینه دوره *{escape_markdown_v2(message.text)}*: {escape_markdown_v2(str(course['cost']))} تومان\n"
+        "شماره حساب: `1234\\-5678\\-9012\\-3456`\n"
+        "لطفاً مبلغ رو پرداخت کن و عکس فیش رو بفرست:"
+    )
+    await message.reply(text, parse_mode="MarkdownV2", reply_markup=cancel_button)
+    await state.set_state(RegisterStates.waiting_for_receipt)
 
 async def visit_register(message: types.Message, state: FSMContext):
     visits = await get_visits()
@@ -207,6 +204,7 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(process_phone, RegisterStates.waiting_for_phone)
     dp.message.register(process_email, RegisterStates.waiting_for_email)
     dp.message.register(course_register, lambda message: message.text == "📚 ثبت‌نام دوره", RegisterStates.main_menu)
+    dp.message.register(process_course, RegisterStates.waiting_for_course)  # اضافه کردن Handler برای انتخاب دوره
     dp.message.register(visit_register, lambda message: message.text == "🏢 ثبت‌نام بازدید", RegisterStates.main_menu)
     dp.message.register(return_to_main_menu, lambda message: message.text == "🔙 بازگشت به منوی اصلی", RegisterStates.main_menu)
     dp.message.register(process_visit, RegisterStates.waiting_for_visit)
