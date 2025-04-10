@@ -9,6 +9,7 @@ from database.db import (add_event, add_course, add_visit, get_registration,
 import logging
 import os
 from dotenv import load_dotenv
+from bson.objectid import ObjectId  # اضافه کردن این خط
 
 load_dotenv()
 
