@@ -190,7 +190,7 @@ async def process_receipt(message: types.Message, state: FSMContext):
     await message.reply("✅ فیشت ثبت شد! منتظر تأیید ادمین باش.", reply_markup=main_menu)
     bot = message.bot
     await bot.send_photo(
-        ADMINS,
+        ADMINS[0],
         message.photo[-1].file_id,
         caption=f"درخواست ثبت‌نام\nکاربر: {message.from_user.id}\n{data['item_type']}: {data['selected_item']}\nID: {reg_id}"
     )
