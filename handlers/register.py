@@ -39,6 +39,13 @@ cancel_button = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# تابع کمکی برای فرار کاراکترهای خاص در MarkdownV2
+def escape_markdown_v2(text: str) -> str:
+    reserved_chars = r"_*[]()~`>#+-=|{}.!"
+    for char in reserved_chars:
+        text = text.replace(char, f"\\{char}")
+    return text
+
 async def register_cmd(message: types.Message, state: FSMContext):
     user = await get_user(str(message.from_user.id))
     if user and user.get("registered", 0):
@@ -112,26 +119,32 @@ async def course_register(message: types.Message, state: FSMContext):
     
     # ارسال هر دوره به صورت پیام جداگانه
     for course in courses:
+        description = course["description"][:800]  # محدود کردن به 800 کاراکتر
         text = (
-            f"📚 دوره آموزشی:\n"
-            f"عنوان: {course['title']}\n"
-            f"هزینه: {course['cost']} تومان\n"
-            f"توضیحات: {course['description']}"
+            "📚 *دوره آموزشی:*\n"
+            f"*عنوان:* {escape_markdown_v2(course['title'])}\n"
+            f"*هزینه:* {escape_markdown_v2(str(course['cost']))} تومان\n"
+            f"*توضیحات:* {escape_markdown_v2(description)}"
         )
-        if course.get("photo"):
-            await message.bot.send_photo(
-                chat_id=message.chat.id,
-                photo=course["photo"],
-                caption=text,
-                parse_mode="Markdown"
-            )
-        else:
-            await message.bot.send_message(
-                chat_id=message.chat.id,
-                text=text,
-                parse_mode="Markdown"
-            )
-        await asyncio.sleep(0.5)
+        logger.debug(f"Sending course: {course['title']}, photo: {course.get('photo')}, caption length: {len(text)}")
+        try:
+            if course.get("photo"):
+                await message.bot.send_photo(
+                    chat_id=message.chat.id,
+                    photo=course["photo"],
+                    caption=text,
+                    parse_mode="MarkdownV2"  # تغییر به MarkdownV2
+                )
+            else:
+                await message.bot.send_message(
+                    chat_id=message.chat.id,
+                    text=text,
+                    parse_mode="MarkdownV2"
+                )
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Error sending course {course['title']}: {str(e)}")
+            await message.reply(f"خطا در نمایش دوره {course['title']}", reply_markup=main_menu)
     
     await message.reply("این‌ها دوره‌های موجود بودن!", reply_markup=main_menu)
     await state.clear()
