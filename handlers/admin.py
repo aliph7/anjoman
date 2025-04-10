@@ -322,36 +322,54 @@ async def process_reg_id(message: types.Message, state: FSMContext):
         await message.reply("عملیات لغو شد.", reply_markup=admin_menu)
         await state.set_state(AdminStates.admin_panel)
         return
-    reg_id = message.text.strip()  # MongoDB از ObjectId استفاده می‌کنه، نیازی به int نیست
-    registration = await get_registration(reg_id)  # اضافه کردن await
-    if not registration:
-        await message.reply("این ID ثبت‌نام وجود نداره! دوباره وارد کن:")
-        return
-    user_id = registration["user_id"]
-    item_type = registration["type"]
-    item_title = registration["item_title"]
-    confirm_kb = types.ReplyKeyboardMarkup(
-        keyboard=[
-            [types.KeyboardButton(text="✅ تأیید"), types.KeyboardButton(text="❌ رد")],
-            [types.KeyboardButton(text="لغو")]
-        ],
-        resize_keyboard=True
-    )
-    user = await get_user(str(user_id))  # اضافه کردن await
-    user_info = (
-        f"اسم: {user['name']}\n"
-        f"رشته: {user['field']}\n"
-        f"شماره دانشجویی: {user['student_id']}\n"
-        f"تلفن: {user['phone']}\n"
-        f"ایمیل: {user['email']}"
-    ) if user else "اطلاعات کاربر پیدا نشد!"
-    await message.reply(
-        f"ثبت‌نام:\nکاربر: {user_id}\n{user_info}\nنوع: {item_type}\nعنوان: {item_title}\nوضعیت: {registration['status']}\n"
-        "انتخاب کن:",
-        reply_markup=confirm_kb
-    )
-    await state.update_data(reg_id=reg_id)
-    await state.set_state(AdminStates.waiting_for_confirmation)
+    
+    reg_id = message.text.strip()
+    logger.debug(f"Received reg_id: {reg_id}")
+    
+    # اعتبارسنجی reg_id
+    try:
+        # چک کردن اینکه reg_id یه ObjectId معتبره یا نه
+        if len(reg_id) != 24 or not all(c in "0123456789abcdefABCDEF" for c in reg_id):
+            await message.reply("ID ثبت‌نام باید یه رشته 24 کاراکتری هگزادسیمال باشه! دوباره وارد کن:", reply_markup=cancel_kb)
+            return
+        ObjectId(reg_id)  # تست تبدیل به ObjectId
+        
+        registration = await get_registration(reg_id)
+        if not registration:
+            await message.reply("این ID ثبت‌نام وجود نداره! دوباره وارد کن:", reply_markup=cancel_kb)
+            return
+        
+        user_id = registration["user_id"]
+        item_type = registration["type"]
+        item_title = registration["item_title"]
+        confirm_kb = types.ReplyKeyboardMarkup(
+            keyboard=[
+                [types.KeyboardButton(text="✅ تأیید"), types.KeyboardButton(text="❌ رد")],
+                [types.KeyboardButton(text="لغو")]
+            ],
+            resize_keyboard=True
+        )
+        user = await get_user(str(user_id))
+        user_info = (
+            f"اسم: {user['name']}\n"
+            f"رشته: {user['field']}\n"
+            f"شماره دانشجویی: {user['student_id']}\n"
+            f"تلفن: {user['phone']}\n"
+            f"ایمیل: {user['email']}"
+        ) if user else "اطلاعات کاربر پیدا نشد!"
+        await message.reply(
+            f"ثبت‌نام:\nکاربر: {user_id}\n{user_info}\nنوع: {item_type}\nعنوان: {item_title}\nوضعیت: {registration['status']}\n"
+            "انتخاب کن:",
+            reply_markup=confirm_kb
+        )
+        await state.update_data(reg_id=reg_id)
+        await state.set_state(AdminStates.waiting_for_confirmation)
+    except ValueError as e:
+        logger.error(f"Invalid reg_id format: {reg_id}, error: {str(e)}")
+        await message.reply("ID ثبت‌نام نامعتبره! باید یه رشته 24 کاراکتری هگزادسیمال باشه (مثل 507f1f77bcf86cd799439011):", reply_markup=cancel_kb)
+    except Exception as e:
+        logger.error(f"Error processing reg_id {reg_id}: {str(e)}")
+        await message.reply("خطایی پیش اومد! دوباره امتحان کن:", reply_markup=cancel_kb)
 
 async def process_reg_confirmation(message: types.Message, state: FSMContext):
     if message.text == "لغو":
