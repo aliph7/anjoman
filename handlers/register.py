@@ -197,7 +197,8 @@ async def process_receipt(message: types.Message, state: FSMContext):
             await bot.send_photo(
                 admin_id,
                 message.photo[-1].file_id,
-                caption=f"درخواست ثبت‌نام\nکاربر: {message.from_user.id}\n{data['item_type']}: {data['selected_item']}\nID: {reg_id}"
+                caption=f"درخواست ثبت‌نام\nکاربر: {message.from_user.id}\n{data['item_type']}: {data['selected_item']}\nID: `{reg_id}`",
+                parse_mode="MarkdownV2"
             )
             logger.info(f"Notification sent successfully to admin {admin_id}")
         except Exception as e:
