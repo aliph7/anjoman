@@ -9,7 +9,9 @@ from database.db import (add_event, add_course, add_visit, get_registration,
 import logging
 import os
 from dotenv import load_dotenv
-from bson.objectid import ObjectId  # اضافه کردن این خط
+from bson.objectid import ObjectId
+import pandas as pd
+from io import BytesIO
 
 load_dotenv()
 
@@ -128,9 +130,9 @@ async def process_course_photo(message: types.Message, state: FSMContext):
     cost = data["course_cost"]
     desc = data["course_desc"]
     try:
-        await add_course(title=title, cost=cost, description=desc, photo=photo)  # اضافه کردن await
+        await add_course(title=title, cost=cost, description=desc, photo=photo)
         await message.reply("✅ دوره با موفقیت اضافه شد!", reply_markup=admin_menu)
-        users = await get_all_registered_users()  # اضافه کردن await
+        users = await get_all_registered_users()
         caption = f"📚 دوره جدید: {title}\nهزینه: {cost} تومان\nتوضیحات: {desc}"
         for user_id in users:
             try:
@@ -207,9 +209,9 @@ async def process_event_photo(message: types.Message, state: FSMContext):
     date = data["event_date"]
     desc = data["event_desc"]
     try:
-        await add_event(title, date, desc, photo)  # اضافه کردن await
+        await add_event(title, date, desc, photo)
         await message.reply("✅ رویداد با موفقیت اضافه شد!", reply_markup=admin_menu)
-        users = await get_all_registered_users()  # اضافه کردن await
+        users = await get_all_registered_users()
         caption = f"🎉 رویداد جدید: {title}\nتاریخ: {date}\nتوضیحات: {desc}"
         for user_id in users:
             try:
@@ -292,9 +294,9 @@ async def process_visit_photo(message: types.Message, state: FSMContext):
     cost = data["visit_cost"]
     desc = data["visit_desc"]
     try:
-        await add_visit(title, cost, desc, photo)  # اضافه کردن await
+        await add_visit(title, cost, desc, photo)
         await message.reply("✅ بازدید با موفقیت اضافه شد!", reply_markup=admin_menu)
-        users = await get_all_registered_users()  # اضافه کردن await
+        users = await get_all_registered_users()
         caption = f"🏛 بازدید جدید: {title}\nهزینه: {cost} تومان\nتوضیحات: {desc}"
         for user_id in users:
             try:
@@ -379,15 +381,15 @@ async def process_reg_confirmation(message: types.Message, state: FSMContext):
         return
     data = await state.get_data()
     reg_id = data["reg_id"]
-    registration = await get_registration(reg_id)  # اضافه کردن await
+    registration = await get_registration(reg_id)
     user_id = registration["user_id"]
     try:
         if message.text == "✅ تأیید":
-            await update_registration_status(reg_id, "confirmed")  # اضافه کردن await
+            await update_registration_status(reg_id, "confirmed")
             await message.reply("✅ ثبت‌نام تأیید شد!", reply_markup=admin_menu)
             await message.bot.send_message(user_id, "✅ ثبت‌نامت تأیید شد! خوش اومدی.")
         elif message.text == "❌ رد":
-            await update_registration_status(reg_id, "rejected")  # اضافه کردن await
+            await update_registration_status(reg_id, "rejected")
             await message.reply("❌ ثبت‌نام رد شد!", reply_markup=admin_menu)
             await message.bot.send_message(user_id, "❌ ثبت‌نامت رد شد. لطفاً با ادمین تماس بگیر.")
         else:
@@ -404,28 +406,80 @@ async def show_items_list(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         await message.reply("❌ دسترسی نداری!")
         return
-    courses = await get_courses()  # اضافه کردن await
-    visits = await get_visits()  # اضافه کردن await
+    courses = await get_courses()
+    visits = await get_visits()
     if not courses and not visits:
         await message.reply("هیچ دوره یا بازدیدی وجود نداره!", reply_markup=admin_menu)
         return
     kb = types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text=f"دوره: {c['title']}")] for c in courses] +
-                 [[types.KeyboardButton(text=f"بازدید: {v['title']}")] for v in visits] +
-                 [[types.KeyboardButton(text="🔙 بازگشت")]],
+        keyboard=[
+            [types.KeyboardButton(text="📊 دانلود اکسل ثبت‌نام‌ها")]
+        ] + [[types.KeyboardButton(text=f"دوره: {c['title']}")] for c in courses] +
+            [[types.KeyboardButton(text=f"بازدید: {v['title']}")] for v in visits] +
+            [[types.KeyboardButton(text="🔙 بازگشت")]],
         resize_keyboard=True
     )
-    await message.reply("دوره‌ها و بازدیدها:\nانتخاب کن تا ثبت‌نام‌کننده‌ها رو ببینی:", reply_markup=kb)
+    await message.reply("دوره‌ها و بازدیدها:\nانتخاب کن تا ثبت‌نام‌کننده‌ها رو ببینی یا فایل اکسل رو دانلود کن:", reply_markup=kb)
     await state.set_state(AdminStates.waiting_for_item_selection)
+
+async def download_registrations_excel(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMINS:
+        await message.reply("❌ دسترسی نداری!")
+        return
+    try:
+        registrations = await get_all_registrations()
+        if not registrations:
+            await message.reply("هیچ ثبت‌نامی وجود نداره!", reply_markup=admin_menu)
+            await state.set_state(AdminStates.admin_panel)
+            return
+
+        # آماده‌سازی داده‌ها برای اکسل
+        data = []
+        for reg in registrations:
+            user = await get_user(str(reg["user_id"]))
+            data.append({
+                "نام": user.get("name", "نامشخص") if user else "نامشخص",
+                "رشته": user.get("field", "نامشخص") if user else "نامشخص",
+                "شماره دانشجویی": user.get("student_id", "نامشخص") if user else "نامشخص",
+                "تلفن": user.get("phone", "نامشخص") if user else "نامشخص",
+                "ایمیل": user.get("email", "نامشخص") if user else "نامشخص",
+                "نوع": reg.get("type", "نامشخص"),
+                "عنوان": reg.get("item_title", "نامشخص"),
+                "وضعیت": reg.get("status", "نامشخص"),
+                "شناسه ثبت‌نام": str(reg.get("_id", "نامشخص"))
+            })
+
+        # ایجاد DataFrame با pandas
+        df = pd.DataFrame(data)
+
+        # ذخیره فایل اکسل در حافظه
+        output = BytesIO()
+        df.to_excel(output, index=False, engine="openpyxl")
+        output.seek(0)
+
+        # ارسال فایل به کاربر
+        await message.reply_document(
+            types.InputFile(output, filename="registrations.xlsx"),
+            caption="📊 فایل اکسل ثبت‌نام‌ها",
+            reply_markup=admin_menu
+        )
+        await state.set_state(AdminStates.admin_panel)
+    except Exception as e:
+        logger.error(f"Error generating Excel file: {str(e)}")
+        await message.reply("❌ خطایی در تولید فایل اکسل رخ داد! دوباره امتحان کن.", reply_markup=admin_menu)
+        await state.set_state(AdminStates.admin_panel)
 
 async def show_registrants(message: types.Message, state: FSMContext):
     if message.text == "🔙 بازگشت":
         await message.reply("برگشتی به منوی ادمین!", reply_markup=admin_menu)
         await state.set_state(AdminStates.admin_panel)
         return
+    if message.text == "📊 دانلود اکسل ثبت‌نام‌ها":
+        await download_registrations_excel(message, state)
+        return
     item_type, item_title = message.text.split(": ", 1)
     item_type = "course" if item_type == "دوره" else "visit"
-    registrations = await get_all_registrations()  # اضافه کردن await
+    registrations = await get_all_registrations()
     registrants = [r for r in registrations if r["type"] == item_type and r["item_title"] == item_title and r["status"] == "confirmed"]
     if not registrants:
         await message.reply(f"هیچ ثبت‌نام تأییدشده‌ای توی '{item_title}' وجود نداره!", reply_markup=admin_menu)
@@ -447,12 +501,12 @@ async def show_registrant_details(message: types.Message, state: FSMContext):
     data = await state.get_data()
     item_type = data["item_type"]
     item_title = data["item_title"]
-    registrations = await get_all_registrations()  # اضافه کردن await
+    registrations = await get_all_registrations()
     registrant = next((r for r in registrations if r["name"] == message.text and r["type"] == item_type and r["item_title"] == item_title), None)
     if not registrant:
         await message.reply("این فرد پیدا نشد! دوباره انتخاب کن:")
         return
-    user = await get_user(registrant["user_id"])  # اضافه کردن await
+    user = await get_user(registrant["user_id"])
     response = (
         f"📋 مشخصات ثبت‌نام:\n"
         f"اسم: {user['name']}\n"
@@ -471,8 +525,8 @@ async def start_delete_item(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         await message.reply("❌ دسترسی نداری!")
         return
-    courses = await get_courses()  # اضافه کردن await
-    visits = await get_visits()  # اضافه کردن await
+    courses = await get_courses()
+    visits = await get_visits()
     if not courses and not visits:
         await message.reply("هیچ دوره یا بازدیدی برای حذف وجود نداره!", reply_markup=admin_menu)
         return
@@ -493,10 +547,10 @@ async def process_item_deletion(message: types.Message, state: FSMContext):
     item_type, item_title = message.text.split(": ", 1)
     try:
         if item_type == "دوره":
-            await delete_course(item_title)  # اضافه کردن await
+            await delete_course(item_title)
             await message.reply(f"✅ دوره '{item_title}' با موفقیت حذف شد!", reply_markup=admin_menu)
         elif item_type == "بازدید":
-            await delete_visit(item_title)  # اضافه کردن await
+            await delete_visit(item_title)
             await message.reply(f"✅ بازدید '{item_title}' با موفقیت حذف شد!", reply_markup=admin_menu)
         else:
             await message.reply("گزینه نامعتبر! دوباره انتخاب کن:")
@@ -512,7 +566,7 @@ async def show_contact_messages(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         await message.reply("❌ دسترسی نداری!")
         return
-    contacts = await get_all_contact_messages()  # اضافه کردن await
+    contacts = await get_all_contact_messages()
     if not contacts:
         await message.reply("هیچ پیامی از کاربران وجود نداره!", reply_markup=admin_menu)
         await state.set_state(AdminStates.admin_panel)
@@ -530,12 +584,12 @@ async def show_contact_details(message: types.Message, state: FSMContext):
         await message.reply("برگشتی به منوی ادمین!", reply_markup=admin_menu)
         await state.set_state(AdminStates.admin_panel)
         return
-    contacts = await get_all_contact_messages()  # اضافه کردن await
+    contacts = await get_all_contact_messages()
     selected = next((c for c in contacts if f"{c['name']} - {c['timestamp']}" == message.text), None)
     if not selected:
         await message.reply("این پیام پیدا نشد! دوباره انتخاب کن:")
         return
-    user = await get_user(selected["user_id"])  # اضافه کردن await
+    user = await get_user(selected["user_id"])
     response = (
         f"📬 جزئیات پیام:\n"
         f"اسم: {selected['name']}\n"
@@ -568,6 +622,7 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(process_reg_id, AdminStates.waiting_for_reg_id)
     dp.message.register(process_reg_confirmation, AdminStates.waiting_for_confirmation)
     dp.message.register(show_items_list, lambda message: message.text == "📋 لیست ثبت‌نام‌ها", AdminStates.admin_panel)
+    dp.message.register(download_registrations_excel, lambda message: message.text == "📊 دانلود اکسل ثبت‌نام‌ها", AdminStates.waiting_for_item_selection)
     dp.message.register(show_registrants, AdminStates.waiting_for_item_selection)
     dp.message.register(show_registrant_details, AdminStates.waiting_for_registrant_selection)
     dp.message.register(start_delete_item, lambda message: message.text == "🗑️ حذف دوره/بازدید", AdminStates.admin_panel)
