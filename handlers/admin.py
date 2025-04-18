@@ -412,30 +412,32 @@ async def show_items_list(message: types.Message, state: FSMContext):
         await message.reply("هیچ دوره یا بازدیدی وجود نداره!", reply_markup=admin_menu)
         return
     kb = types.ReplyKeyboardMarkup(
-        keyboard=[
-            [types.KeyboardButton(text="📊 دانلود اکسل ثبت‌نام‌ها")]
-        ] + [[types.KeyboardButton(text=f"دوره: {c['title']}")] for c in courses] +
-            [[types.KeyboardButton(text=f"بازدید: {v['title']}")] for v in visits] +
-            [[types.KeyboardButton(text="🔙 بازگشت")]],
+        keyboard=[[types.KeyboardButton(text=f"دوره: {c['title']}")] for c in courses] +
+                 [[types.KeyboardButton(text=f"بازدید: {v['title']}")] for v in visits] +
+                 [[types.KeyboardButton(text="🔙 بازگشت")]],
         resize_keyboard=True
     )
-    await message.reply("دوره‌ها و بازدیدها:\nانتخاب کن تا ثبت‌نام‌کننده‌ها رو ببینی یا فایل اکسل رو دانلود کن:", reply_markup=kb)
+    await message.reply("دوره‌ها و بازدیدها:\nانتخاب کن تا ثبت‌نام‌کننده‌ها رو ببینی:", reply_markup=kb)
     await state.set_state(AdminStates.waiting_for_item_selection)
 
 async def download_registrations_excel(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         await message.reply("❌ دسترسی نداری!")
         return
+    data = await state.get_data()
+    item_type = data["item_type"]
+    item_title = data["item_title"]
     try:
         registrations = await get_all_registrations()
-        if not registrations:
-            await message.reply("هیچ ثبت‌نامی وجود نداره!", reply_markup=admin_menu)
+        registrants = [r for r in registrations if r["type"] == item_type and r["item_title"] == item_title and r["status"] == "confirmed"]
+        if not registrants:
+            await message.reply(f"هیچ ثبت‌نام تأییدشده‌ای برای '{item_title}' وجود نداره!", reply_markup=admin_menu)
             await state.set_state(AdminStates.admin_panel)
             return
 
         # آماده‌سازی داده‌ها برای اکسل
         data = []
-        for reg in registrations:
+        for reg in registrants:
             user = await get_user(str(reg["user_id"]))
             data.append({
                 "نام": user.get("name", "نامشخص") if user else "نامشخص",
@@ -458,9 +460,11 @@ async def download_registrations_excel(message: types.Message, state: FSMContext
         output.seek(0)
 
         # ارسال فایل به کاربر
+        safe_title = item_title.replace(" ", "_").replace("/", "_")  # جایگزینی کاراکترهای نامعتبر
+        filename = f"{safe_title}_registrations.xlsx"
         await message.reply_document(
-            types.InputFile(output, filename="registrations.xlsx"),
-            caption="📊 فایل اکسل ثبت‌نام‌ها",
+            types.BufferedInputFile(output.getvalue(), filename=filename),
+            caption=f"📊 فایل اکسل ثبت‌نام‌های '{item_title}'",
             reply_markup=admin_menu
         )
         await state.set_state(AdminStates.admin_panel)
@@ -470,12 +474,12 @@ async def download_registrations_excel(message: types.Message, state: FSMContext
         await state.set_state(AdminStates.admin_panel)
 
 async def show_registrants(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMINS:
+        await message.reply("❌ دسترسی نداری!")
+        return
     if message.text == "🔙 بازگشت":
         await message.reply("برگشتی به منوی ادمین!", reply_markup=admin_menu)
         await state.set_state(AdminStates.admin_panel)
-        return
-    if message.text == "📊 دانلود اکسل ثبت‌نام‌ها":
-        await download_registrations_excel(message, state)
         return
     item_type, item_title = message.text.split(": ", 1)
     item_type = "course" if item_type == "دوره" else "visit"
@@ -486,17 +490,21 @@ async def show_registrants(message: types.Message, state: FSMContext):
         await state.set_state(AdminStates.admin_panel)
         return
     kb = types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text=r["name"])] for r in registrants] + 
+        keyboard=[[types.KeyboardButton(text="📊 دانلود اکسل ثبت‌نام‌ها")]] +
+                 [[types.KeyboardButton(text=r["name"])] for r in registrants] + 
                  [[types.KeyboardButton(text="🔙 بازگشت")]],
         resize_keyboard=True
     )
     await state.update_data(item_type=item_type, item_title=item_title)
-    await message.reply(f"ثبت‌نام‌کننده‌های تأییدشده‌ی '{item_title}':\nانتخاب کن تا مشخصاتش رو ببینی:", reply_markup=kb)
+    await message.reply(f"ثبت‌نام‌کننده‌های تأییدشده‌ی '{item_title}':\nانتخاب کن تا مشخصاتش رو ببینی یا فایل اکسل رو دانلود کن:", reply_markup=kb)
     await state.set_state(AdminStates.waiting_for_registrant_selection)
 
 async def show_registrant_details(message: types.Message, state: FSMContext):
     if message.text == "🔙 بازگشت":
         await show_items_list(message, state)
+        return
+    if message.text == "📊 دانلود اکسل ثبت‌نام‌ها":
+        await download_registrations_excel(message, state)
         return
     data = await state.get_data()
     item_type = data["item_type"]
@@ -622,7 +630,6 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(process_reg_id, AdminStates.waiting_for_reg_id)
     dp.message.register(process_reg_confirmation, AdminStates.waiting_for_confirmation)
     dp.message.register(show_items_list, lambda message: message.text == "📋 لیست ثبت‌نام‌ها", AdminStates.admin_panel)
-    dp.message.register(download_registrations_excel, lambda message: message.text == "📊 دانلود اکسل ثبت‌نام‌ها", AdminStates.waiting_for_item_selection)
     dp.message.register(show_registrants, AdminStates.waiting_for_item_selection)
     dp.message.register(show_registrant_details, AdminStates.waiting_for_registrant_selection)
     dp.message.register(start_delete_item, lambda message: message.text == "🗑️ حذف دوره/بازدید", AdminStates.admin_panel)
