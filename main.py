@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # متغیرهای محیطی
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMINS = [int(x) for x in os.getenv("ADMINS", "0").split(",") if x]
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://unibot-vfzt.onrender.com")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://anjoman.onrender.com")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 PORT = int(os.getenv("PORT", 8000))
